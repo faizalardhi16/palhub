@@ -1,0 +1,18 @@
+# Node
+node_modules/
+dist/
+
+# Rust
+src-tauri/target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# PalHub local
+.palhub/
