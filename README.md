@@ -1,8 +1,8 @@
 # PalHub
 
-**Desktop skills hub for AI coding tools.** Install skills from npm/GitHub, then inject them into Cursor, Codex, Claude Code, or OpenCode — globally or per project.
+**Desktop skills hub for AI coding tools.** Install skills from npm/GitHub/local folders, then inject them into Cursor, Codex, Claude Code, or OpenCode — globally or per project. Skills can carry a **knowledge bundle** (`knowledge/` folder, e.g. harvested daily from official sources by [pal-knowledge](https://github.com/faizalardhi16/pal-knowledge)) — so a skill is not just a template, it has domain knowledge too.
 
-> **Phase 1 scope:** A Tauri desktop app (Windows) that acts as a skills store + injector for 4 AI coding tools: **Cursor, Codex, Claude Code, OpenCode**. Skill sourcing from **npm** and **GitHub**. Injection into **global tool folders** or **project structure**.
+> **Phase 2 scope:** knowledge bundles. Sources extended with `local:` (install directly from a harvester folder like `~/pal-knowledge/skills/finance-id`), injector now copies the `knowledge/` folder alongside rules, and the store UI shows a 🧠 badge with the file count.
 
 ---
 
@@ -42,7 +42,7 @@
 
 ## 2. Skill Format
 
-A skill is a **folder containing `SKILL.md`** (plus optional `references/`, `scripts/`, `templates/`, `assets/`).
+A skill is a **folder containing `SKILL.md`** (plus optional `references/`, `scripts/`, `templates/`, `assets/`, and — since Phase 2 — a **`knowledge/`** bundle).
 
 ```yaml
 ---
@@ -54,6 +54,24 @@ license: MIT
 ---
 # body (markdown — the actual skill instructions)
 ```
+
+### Knowledge bundles (Phase 2)
+
+A skill can carry a `knowledge/` folder with domain facts harvested from official sources (see [pal-knowledge](https://github.com/faizalardhi16/pal-knowledge)):
+
+```
+finance-id/
+├── SKILL.md
+└── knowledge/
+    ├── index.md        # topic list + as-of date
+    ├── sources.json    # provenance (url, tier, date)
+    └── topik/*.md      # curated fact notes w/ frontmatter
+```
+
+Behavior:
+- The store detects `knowledge/` and shows a **🧠 N files** badge.
+- **Codex / Claude Code** (folder-copy tools) carry `knowledge/` automatically.
+- **Cursor / OpenCode** (single-file rules) get a copied `.skillname.knowledge/` folder next to the rule, plus a `## Knowledge` pointer appended to the injected body so the model knows where to look.
 
 Rules:
 - `name` must be unique in the store (kebab-case).
@@ -131,6 +149,7 @@ interface SkillMeta {
 | `github:owner/repo#subdir` | `github:acme/skills#skills/analyst` | clone, then use `subdir` as the skill folder |
 | `npm:package` | `npm:@anthropic/skills` | `npm pack` + extract; find `SKILL.md` at tarball root or `skills/` subfolder |
 | `npm:package@version` | `npm:pal-skills@0.3.1` | pinned version |
+| `local:/path` | `local:~/pal-knowledge/skills/finance-id` | copy a local skill folder (no git/npm needed) — great for harvester output |
 
 ### 4.2 Project
 

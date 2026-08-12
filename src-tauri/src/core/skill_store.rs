@@ -19,6 +19,8 @@ pub struct SkillMeta {
     pub path: String,
     pub size: u64,
     pub installed_at: String,
+    pub has_knowledge: bool,
+    pub knowledge_files: u64,
 }
 
 /// Provenance record kept in `~/.palhub/registry.json`.
@@ -101,6 +103,7 @@ impl SkillStore {
             let name = entry.file_name().to_string_lossy().to_string();
             let meta = self.read_skill(&name, &path, &reg).unwrap_or_else(|e| {
                 // A broken skill folder should not crash the whole list.
+                let (has_knowledge, knowledge_files) = knowledge_stats(&path);
                 SkillMeta {
                     name: name.clone(),
                     description: format!("<unreadable: {e}>"),
@@ -116,6 +119,8 @@ impl SkillStore {
                     path: path.display().to_string(),
                     size: 0,
                     installed_at: String::new(),
+                    has_knowledge,
+                    knowledge_files,
                 }
             });
             out.push(meta);
@@ -132,6 +137,7 @@ impl SkillStore {
     ) -> Result<SkillMeta> {
         let fm = parse_skill_md(dir)?;
         let size = dir_size(dir)?;
+        let (has_knowledge, knowledge_files) = knowledge_stats(dir);
         let source = reg
             .get(name)
             .and_then(|v| v.get("source"))
@@ -154,6 +160,8 @@ impl SkillStore {
             path: dir.display().to_string(),
             size,
             installed_at,
+            has_knowledge,
+            knowledge_files,
         })
     }
 
@@ -195,6 +203,7 @@ impl SkillStore {
         self.set_registry_entry(&name, source)?;
 
         let size = dir_size(&dest)?;
+        let (has_knowledge, knowledge_files) = knowledge_stats(&dest);
         let meta = SkillMeta {
             name: fm.name.unwrap_or(name),
             description: fm.description.unwrap_or_default(),
@@ -205,6 +214,8 @@ impl SkillStore {
             path: dest.display().to_string(),
             size,
             installed_at: Utc::now().to_rfc3339(),
+            has_knowledge,
+            knowledge_files,
         };
         Ok(meta)
     }
@@ -257,6 +268,7 @@ impl SkillStore {
         }
         self.set_registry_entry(name, &source)?;
         let fm = parse_skill_md(&dest).context("refreshed skill has invalid SKILL.md")?;
+        let (has_knowledge, knowledge_files) = knowledge_stats(&dest);
         Ok(SkillMeta {
             name: fm.name.unwrap_or_else(|| name.to_string()),
             description: fm.description.unwrap_or_default(),
@@ -267,6 +279,8 @@ impl SkillStore {
             path: dest.display().to_string(),
             size: dir_size(&dest)?,
             installed_at: Utc::now().to_rfc3339(),
+            has_knowledge,
+            knowledge_files,
         })
     }
 
@@ -388,6 +402,30 @@ pub fn dir_size(path: &Path) -> Result<u64> {
     Ok(acc)
 }
 
+/// Detect a `knowledge/` bundle inside a skill folder: `(exists, file_count)`.
+pub fn knowledge_stats(dir: &Path) -> (bool, u64) {
+    let kdir = dir.join("knowledge");
+    if !kdir.is_dir() {
+        return (false, 0);
+    }
+    let mut count = 0u64;
+    fn walk(p: &Path, count: &mut u64) {
+        if let Ok(entries) = fs::read_dir(p) {
+            for e in entries.flatten() {
+                let ft = e.file_type();
+                let Ok(ft) = ft else { continue };
+                if ft.is_dir() {
+                    walk(&e.path(), count);
+                } else if ft.is_file() {
+                    *count += 1;
+                }
+            }
+        }
+    }
+    walk(&kdir, &mut count);
+    (true, count)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -447,5 +485,64 @@ mod tests {
         let err = store.install("https://example.com/x", None).unwrap_err();
         assert!(err.to_string().contains("unsupported source"));
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn knowledge_stats_detects_bundle() {
+        let dir = std::env::temp_dir().join("palhub-test-knowledge");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("knowledge").join("topik")).unwrap();
+        fs::write(dir.join("SKILL.md"), "# Skill").unwrap();
+        fs::write(dir.join("knowledge").join("index.md"), "# Index").unwrap();
+        fs::write(dir.join("knowledge").join("topik").join("a.md"), "a").unwrap();
+        fs::write(dir.join("knowledge").join("topik").join("b.md"), "b").unwrap();
+
+        let (has, count) = knowledge_stats(&dir);
+        assert!(has);
+        assert_eq!(count, 3);
+
+        // No knowledge dir → (false, 0).
+        let plain = std::env::temp_dir().join("palhub-test-plain");
+        let _ = fs::remove_dir_all(&plain);
+        fs::create_dir_all(&plain).unwrap();
+        fs::write(plain.join("SKILL.md"), "# S").unwrap();
+        let (has, count) = knowledge_stats(&plain);
+        assert!(!has);
+        assert_eq!(count, 0);
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&plain);
+    }
+
+    #[test]
+    fn local_source_install_copies_knowledge() {
+        let base = std::env::temp_dir().join("palhub-test-local");
+        let _ = fs::remove_dir_all(&base);
+        let store = SkillStore::at(base.clone()).unwrap();
+
+        // Build a local skill folder with a knowledge bundle.
+        let local = std::env::temp_dir().join("palhub-test-localsrc").join("finance-id");
+        let _ = fs::remove_dir_all(&local);
+        fs::create_dir_all(local.join("knowledge")).unwrap();
+        fs::write(
+            local.join("SKILL.md"),
+            "---\nname: finance-id\ndescription: Finance knowledge\n---\n# Body",
+        )
+        .unwrap();
+        fs::write(local.join("knowledge").join("index.md"), "# Index").unwrap();
+
+        let meta = store
+            .install(&format!("local:{}", local.display()), None)
+            .unwrap();
+        assert_eq!(meta.name, "finance-id");
+        assert!(meta.has_knowledge);
+        assert_eq!(meta.knowledge_files, 1);
+
+        // Installed folder carries knowledge/.
+        let dest = store.resolve("finance-id").unwrap();
+        assert!(dest.join("knowledge").join("index.md").exists());
+
+        let _ = fs::remove_dir_all(&base);
+        let _ = fs::remove_dir_all(&local);
     }
 }

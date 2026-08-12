@@ -4,7 +4,8 @@ import type { SkillMeta } from "../types";
 
 const SOURCE_EXAMPLES = [
   "github:faizalardhi16/quivern",
-  "github:owner/repo#subdir",
+  "github:faizalardhi16/pal-knowledge#skills/finance-id",
+  "local:/root/pal-knowledge/skills/finance-id",
   "npm:package-name",
   "npm:package-name@1.2.3",
 ];
@@ -133,7 +134,14 @@ export default function StoreView() {
                       {t}
                     </span>
                   ))}
-                  {s.tags.length === 0 && <span className="tag dim">no tags</span>}
+                  {s.has_knowledge && (
+                    <span className="tag knowledge" title={`${s.knowledge_files} knowledge files`}>
+                      🧠 {s.knowledge_files} files
+                    </span>
+                  )}
+                  {s.tags.length === 0 && !s.has_knowledge && (
+                    <span className="tag dim">no tags</span>
+                  )}
                 </div>
                 <div className="skill-foot">
                   <span className="skill-source mono" title={s.source}>

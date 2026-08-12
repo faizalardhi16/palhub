@@ -10,6 +10,8 @@ export interface SkillMeta {
   path: string;
   size: number;
   installed_at: string;
+  has_knowledge: boolean;
+  knowledge_files: number;
 }
 
 export interface ProjectInfo {
