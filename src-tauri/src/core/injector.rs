@@ -394,4 +394,62 @@ mod tests {
 
         let _ = fs::remove_dir_all(&base);
     }
+
+    /// E2E: skill hasil export PalHub Web (SKILL.md + knowledge bundle) harus
+    /// bisa di-install ke store lalu di-inject ke semua tool — persis alur
+    /// "Export Skill → PalHub desktop → Cursor/Codex/Claude Code/OpenCode".
+    #[test]
+    fn inject_real_exported_skill() {
+        // Lokasi hasil export pipeline "Development Cycle" (dari PalHub Web).
+        let exported = Path::new("/tmp/skills/development-cycle");
+        if !exported.join("SKILL.md").is_file() {
+            eprintln!("skip: /tmp/skills/development-cycle belum di-export");
+            return;
+        }
+
+        let base = std::env::temp_dir().join("palhub-test-exported");
+        let _ = fs::remove_dir_all(&base);
+        let store = SkillStore::at(base.join("store")).unwrap();
+        let meta = store.install(&format!("local:{}", exported.display()), None).unwrap();
+        assert_eq!(meta.name, "development-cycle");
+        assert!(meta.has_knowledge, "exported skill harus bawa knowledge bundle");
+        assert!(meta.knowledge_files > 20, "knowledge_files={}", meta.knowledge_files);
+
+        let injector = Injector::new(&store);
+        let project = base.join("project");
+        fs::create_dir_all(&project).unwrap();
+
+        for tool in ["cursor", "codex", "claude-code", "opencode"] {
+            let res = injector.inject(tool, "development-cycle", "project", Some(&project)).unwrap();
+            assert_eq!(res.status, "injected", "{tool}: {0}", res.message);
+            assert!(res.message.contains("knowledge bundle included"), "{tool}: {0}", res.message);
+
+            if tool == "codex" || tool == "claude-code" {
+                let skill_dir = tools::project_dir(tool, &project).unwrap().join("development-cycle");
+                assert!(skill_dir.join("SKILL.md").exists(), "{tool}");
+                assert!(skill_dir.join("knowledge").join("finance").join("index.md").exists(), "{tool}");
+                // Frontmatter name harus match nama skill (store resolve).
+                let body = fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
+                assert!(body.contains("name: development-cycle"), "{tool}");
+            } else {
+                let scope = tools::project_dir(tool, &project).unwrap();
+                let kdir = scope.join(".development-cycle.knowledge");
+                assert!(kdir.join("finance").join("index.md").exists(), "{tool}: {0}", res.message);
+                let raw = fs::read_to_string(&res.target).unwrap();
+                assert!(raw.contains("## Knowledge"), "{tool}");
+                assert!(raw.contains("knowledge/finance/"), "{tool}");
+            }
+        }
+
+        // Uninject bersih — semua artefak (rule + knowledge bundle) harus hilang.
+        for tool in ["cursor", "codex", "claude-code", "opencode"] {
+            injector.uninject(tool, "development-cycle", "project", Some(&project)).unwrap();
+        }
+        let scope = tools::project_dir("cursor", &project).unwrap();
+        assert!(!scope.join(".development-cycle.knowledge").exists());
+        assert!(!scope.join("development-cycle.mdc").exists());
+        assert!(!tools::project_dir("opencode", &project).unwrap().join("AGENTS.md").exists());
+
+        let _ = fs::remove_dir_all(&base);
+    }
 }
